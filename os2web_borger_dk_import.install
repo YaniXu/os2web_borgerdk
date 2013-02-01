@@ -1,0 +1,81 @@
+<?php
+
+/**
+ * @file
+ * Install/Schema, and uninstall functions for os2web_borger_dk_import.module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function os2web_borger_dk_import_uninstall() {
+  variable_del('os2web_borger_dk_import_display');
+  variable_del('os2web_borger_dk_import_editable');
+}
+
+/**
+ * Implements hook_enable().
+ */
+function os2web_borger_dk_import_enable() {
+
+  drupal_set_message($message = t('The OS2web - borger.dk import  module was successfully enabled.'), $type = 'status');
+  // Check if table exists, if not install the schema.
+  if (db_table_exists('table_name') == FALSE) {
+    drupal_install_schema('os2web_borger_dk_import');
+  }
+}
+
+
+/**
+ * Implements hook_schema().
+ */
+function os2web_borger_dk_import_schema() {
+
+  $schema['os2web_borger_dk_import'] = array(
+    'description' => 'Table for storing the individual article items imported from Borger.dk.',
+    'fields' => array(
+      'nid'  => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'Primary Key: the node identifier for a article item.',
+      ),
+      'external_id'  => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'Primary Key: the node identifier for a article item.',
+      ),
+      'external_url'  => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Primary Key: the node identifier for a article item.',
+      ),
+      'field_settings' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+        'size' => 'medium',
+        'description' => 'field settings of the article item.',
+      ),
+      'published_date' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'Published date of the article item, as a Unix timestamp.',
+      ),
+      'last_updated' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'description' => 'Last updated of the article item, as a Unix timestamp.',
+      ),      
+
+    ),
+
+    'primary key' => array('nid'),
+    'indexes' => array(
+
+      'imported_date' => array('imported_date'),
+    ),
+
+  );
+
+  return $schema;
+}

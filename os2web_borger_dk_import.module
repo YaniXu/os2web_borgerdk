@@ -1,0 +1,404 @@
+<?php
+/**
+ * @file
+ * Drupal needs this blank file.
+ *NB: NO Drupal does NOT need a blank file! Drupal needs to be told what node type this
+ * feature-module can handle or you will not be able to create new content of this type.
+ *
+ * PLEASE REMEMBER TO CHANGE HOOK_node_info to <module-name>_node_info, and also change
+ * the items-array so that it reflects the new node-type correctly.
+ */
+
+/**
+ * Implements hook_node_info().
+ */
+function os2web_borger_dk_import_node_info() {
+  $items = array(
+    'borger_dk_article' => array(
+      'name' => t('Borger.dk article'),
+      'module' => 'os2web_borger_dk_import',
+      'base' => 'node_content',
+      'description' => 'Article imported from Borger.dk',
+      'has_title' => TRUE,
+      'title_label' => t('Title'),
+      'help' => '',
+      'locked' => TRUE,
+    ),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function os2web_borger_dk_import_menu() {
+  $items = array();
+  $items['admin/config/borgerdk'] = array(
+    'title' => 'Os2web borger.dk settings',
+    'description' => 'article settings',
+    'position' => 'right',
+    'weight' => -15,
+    'page callback' => 'system_admin_menu_block_page',
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    'access arguments' => array('administer os2web'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/config/borgerdk/settings'] = array(
+    'title' => 'OS2web Borger.dk Settings',
+    'description' => 'General settings for the OS2Web borger.dk project',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('os2web_borger_dk_import_settings_form'),
+    'access arguments' => array('administer os2web'),
+    'type' => MENU_NORMAL_ITEM | MENU_DEFAULT_LOCAL_TASK,
+    'file' => 'os2web_borger_dk_import.admin.inc',
+  );
+  return $items;
+}
+
+
+/**
+ * Implements hook_form_alter().
+ */
+function os2web_borger_dk_import_form_alter(&$form, &$form_state, $form_id) {
+  if (isset($form['type']) && isset($form['#node'])) {
+    if ($form_id == 'borger_dk_article_node_form') {
+      $value_display = variable_get('os2web_borger_dk_import_display', array(NULL));
+      $visible_items = (isset($form['#node']->nid)) ? $form['#node']->field_settings : NULL;
+      $data = field_info_instances('node', 'borger_dk_article');
+      $newdata = array();
+      $newdata['title'] = t('Title');
+      foreach ($data as $type => $item) {
+        $newdata[$type] = t($item['label']);
+      }
+      $finaldata = array();
+      $default_values = array();
+      foreach ($value_display as $type => $show) {
+        if (!empty($show)) {
+          $finaldata[$type] = $newdata[$type];
+          // If the item is not set up at the first time.
+          if (!$visible_items) {
+            $default_values[$type] = $type;
+          }
+          else {
+            // If $visible_items[$type] is not set up as disabled with value '0'.
+            if ($visible_items[$type] !== 0) {
+              $default_values[] = $type;
+            }
+          }
+        }
+      }
+      // This is the field fieldset.
+      $form['fields_visible_formset'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Toggle display'),
+        '#collapsible' => TRUE,
+        '#description' => t('Set the visibility of article fields .'),
+        '#group' => 'additional_settings',
+      );
+      $form['fields_visible_formset']['field_settings'] = array(
+        '#type' => 'checkboxes',
+        // '#title' => t('Visible article fields'),
+        '#options' => $finaldata,
+        '#description' => t("Check or uncheck the respective fields"),
+        '#default_value' => $default_values,
+        '#group' => 'additional_settings',
+      );
+      $form['actions']['syncronize'] = array(
+        '#type' => 'submit',
+        '#value' => t("Update article now"),
+        '#weight' => 100,
+        '#access' => variable_get('node_preview_' . $node->type, DRUPAL_OPTIONAL) != DRUPAL_REQUIRED || (!form_get_errors() && isset($form_state['node_preview'])),
+        '#submit' => array('os2web_borger_dk_import_sync_submit'),
+      );
+      $form['#after_build'][] = 'os2web_borger_dk_import_after_build';
+    }
+  }
+}
+
+/**
+ * Funtion os2web_borger_dk_import_sync_submit().
+ */
+function os2web_borger_dk_import_sync_submit($form, &$form_state) {
+  $nid = $form['nid']['#value'];
+  // Call get article function here.
+  // Check the last updated time and compare it with our database.
+  // If new last updated time.
+  $node = $form['#node'];
+  $node->title = 'Syncronized ! 17:00';
+  $node->field_os2web_byline['und'][0]['value'] = 'updated 17:00 ';
+  $node->field_os2web_byline['und'][0]['safe_value'] = 'updated 17:00 ';
+  node_save($node);
+  drupal_goto('node/' . $nid . '/edit');
+}
+
+/**
+ * Function os2web_borger_dk_import_after_build().
+ */
+function os2web_borger_dk_import_after_build($form, &$form_state) {
+  $id = $form['nid']['#value'];
+  $value_display = variable_get('os2web_borger_dk_import_display', array(NULL));
+  if (!empty($id)) {
+    foreach ($value_display as $type => $item) {
+      if (empty($item)) {
+        unset($form[$type]);
+      }
+    }
+    $value_editable = variable_get('os2web_borger_dk_import_editable', array(NULL));
+    foreach ($value_editable as $type => $item) {
+      if (empty($item)) {
+        os2web_borger_dk_import_fix_disabled($form[$type]);
+      }
+    }
+  }
+  else {
+    $data = field_info_instances('node', 'borger_dk_article');
+    $newdata = array();
+    foreach ($data as $type => $item) {
+      // error_log('fields show..here : ' . print_r($type, TRUE) . "\n");
+      if ($type != 'field_os2web_borger_dk_url') {
+        unset($form[$type]);
+      }
+    }
+    unset($form['title']);
+  }
+  return $form;
+}
+
+/**
+ * Function os2web_borger_dk_import_fix_disabled().
+ */
+function os2web_borger_dk_import_fix_disabled(&$elements) {
+  foreach (element_children($elements) as $key) {
+    if (isset($elements[$key]) && $elements[$key]) {
+      // Recurse through all children elements.
+      os2web_borger_dk_import_fix_disabled($elements[$key]);
+    }
+  }
+  if (!isset($elements['#attributes'])) {
+    $elements['#attributes'] = array();
+  }
+  $elements['#attributes']['disabled'] = 'disabled';
+}
+
+/**
+ * Implements hook_node_load().
+ */
+function os2web_borger_dk_import_node_load($nodes, $types) {
+  // Decide whether any of $types are relevant to our purposes.
+  if (count(array_intersect(array('borger_dk_article'), $types))) {
+    // Gather our extra data for each of these nodes.
+    $result = db_query('SELECT nid, external_id, field_settings, published_date, external_url, last_updated FROM {os2web_borger_dk_import} WHERE nid IN(:nids)', array(':nids' => array_keys($nodes)));
+    // Add our extra data to the node objects.
+    foreach ($result as $record) {
+      $nodes[$record->nid]->external_id = $record->external_id;
+      $nodes[$record->nid]->external_url = $record->external_url;
+      // $nodes[$record->nid]->field_settings = $record->field_settings;
+      $nodes[$record->nid]->field_settings = unserialize($record->field_settings);
+      $nodes[$record->nid]->published_date = $record->published_date;
+      $nodes[$record->nid]->last_updated = $record->last_updated;
+    }
+    // error_log('testing.555 borgerurl weight.. here: ' . print_r($nodes, TRUE) . "\n");
+  }
+}
+
+
+/**
+ * Implements theme_preprocess_field().
+ */
+function cmstheme_preprocess_field(&$vars) {
+  $fields = $vars['element']['#object']->field_settings;
+  $data = field_info_instances('node', 'borger_dk_article');
+  foreach ($data as $type => $value) {
+    if (isset($fields[$type]) && $fields[$type] == '0') {
+      if ($vars['element']['#field_name'] == $type) {
+        $vars['items']['0']['#markup'] = '';
+      }
+    }
+    elseif (!isset($fields[$type])) {
+      if ($vars['element']['#field_name'] == $type) {
+        $vars['items']['0']['#markup'] = '';
+      }
+    }
+  }
+}
+
+
+/**
+ * Implements hook_node_insert().
+ */
+function os2web_borger_dk_import_node_insert($node) {
+  // Node form name = field_settings
+  $serialized_data = serialize($node->field_settings);
+  if ($node->type == 'borger_dk_article') {
+    // Error_log('testing..777. here: ' . print_r($node->type'  --t777', TRUE) ."\n");
+    db_merge('os2web_borger_dk_import')
+     ->key(array('nid' => $node->nid))
+     ->fields(array(
+            'nid' => $node->nid,
+            'external_url' => 'www.exmpale.com',
+            'external_id' => 0,
+            'field_settings' => $serialized_data,
+    // 'field_settings' => $serialized_data,
+            'last_updated' => time(),
+            'published_date' => time(),
+     ))
+     ->execute();
+  }
+
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function os2web_borger_dk_import_node_update($node) {
+  os2web_borger_dk_import_node_insert($node);
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function os2web_borger_dk_import_node_delete(&$node) {
+  db_delete('os2web_borger_dk_import')
+    ->condition('nid', $node->nid)
+    ->execute();
+}
+
+
+/**
+ * Implements hook_node_validate().
+ */
+function os2web_borger_dk_import_node_validate($node) {
+  // Enforce a minimum word length of 3 on punch lines.
+  if (empty($node->field_os2web_borger_dk_url)) {
+    form_set_error('field_os2web_borger_dk_url', t('The Borger.dk-URL is empty.'));
+  }
+  else {
+    $url = $node->field_os2web_borger_dk_url['und'][0]['value'];
+    $pos = strpos($url, 'borger.dk/Sider');
+    if ($pos === FALSE) {
+      form_set_error('field_os2web_borger_dk_url', t('The Borger.dk-URL is not validated, please check again. e. g www.borger.dk/Sider/...'));
+    }
+  }
+}
+
+/**
+ * Implements hook_node_submit().
+ */
+function os2web_borger_dk_import_node_submit($node, $form, $form_state) {
+  // A user might assign the node author by entering a user name in the node
+  // form, which we then need to translate to a user ID.
+  if (isset($node->name)) {
+    if ($account = user_load_by_name($node->name)) {
+      $node->uid = $account->uid;
+    }
+    else {
+      $node->uid = 0;
+    }
+  }
+
+  $node->created = !empty($node->date) ? strtotime($node->date) : REQUEST_TIME;
+  $node->validated = TRUE;
+  // Insert default value of a new node.
+  $node->type = 'borger_dk_article';
+  $node->title = 'Add article name';
+  $node->body['und'][0]['value'] = 'Please edit article body text';
+  $node->field_os2web_header['und'][0]['value'] = 'please edit article header';
+  $node->field_os2web_selfservice['und'][0]['value'] = 'please edit article self-service';
+  $node->field_os2web_byline['und'][0]['value'] = 'please edit article byline';
+  $node->field_os2web_legislation['und'][0]['value'] = 'please edit article legislation';
+  $node->field_os2web_shortlist['und'][0]['value'] = 'please edit article shortlist';
+  $node->field_os2web_recommended['und'][0]['value'] = 'please edit article local content';
+  $node->field_os2web_pre_text['und'][0]['value'] = 'please edit article Pre-text';
+  $node->field_os2web_post_text['und'][0]['value'] = 'please edit article Post-text';
+  // Safe_value
+  $node->body['und'][0]['safe_value'] = 'Please edit article body text';
+  $node->field_os2web_header['und'][0]['safe_value'] = 'please edit article header';
+  $node->field_os2web_selfservice['und'][0]['safe_value'] = 'please edit article self-service';
+  $node->field_os2web_byline['und'][0]['safe_value'] = 'please edit article byline';
+  $node->field_os2web_legislation['und'][0]['safe_value'] = 'please edit article legislation';
+  $node->field_os2web_shortlist['und'][0]['safe_value'] = 'please edit article shortlist';
+  $node->field_os2web_recommended['und'][0]['safe_value'] = 'please edit article local content';
+  $node->field_os2web_pre_text['und'][0]['safe_value'] = 'please edit article Pre-text';
+  $node->field_os2web_post_text['und'][0]['safe_value'] = 'please edit article Post-text';
+  node_save($node);
+}
+
+/**
+ * Implements hook_cron().
+ */
+function os2web_borger_dk_import_cron() {
+  $cron_settings_time = variable_get('nightly_article_sync');
+  $system_cron_run_time = variable_get('cron_safe_threshold', DRUPAL_CRON_DEFAULT_THRESHOLD);
+  if (isset($cron_settings_time)) {
+    $current_time = time();
+    $cur_hour = date('H', $current_time);
+    if ($cur_hour + $system_cron_run_time > 24) {
+      $cron_settings_time += 24;
+    }
+    if (($cron_settings_time > $cur_hour) && ($cron_settings_time <= $cur_hour + $system_cron_run_time)) {
+      _os2web_borger_dk_import_run_cron();
+    }
+  }
+}
+
+/**
+ * Function _os2web_borger_dk_import_run_cron().
+ */
+function _os2web_borger_dk_import_run_cron() {
+  $queue = DrupalQueue::get('sync_queue');
+  $queue->createQueue();
+  // $period = $queue->claimItem(60).
+  $result = db_query('SELECT nid FROM {os2web_borger_dk_import}');
+  foreach ($result as $nid) {
+    $queue->createItem($nid->nid);
+    error_log('queue item : ' . print_r($nid->nid, TRUE) . "\n");
+  }
+  $count = $queue->numberOfItems();
+}
+
+/**
+ * Implements hook_cron_queue_info().
+ */
+function os2web_borger_dk_import_cron_queue_info() {
+  error_log('function cron_info :  = ' . print_r('is here', TRUE) . "\n");
+
+  $queues = array();
+  $queues['sync_queue'] = array(
+    // Function to call for each item.
+    'worker callback' => 'os2web_borger_dk_import_callback',
+    // Seconds to spend working on the queue.
+    'time' => 60,
+  );
+  return $queues;
+}
+
+/**
+ * Os2web_borger_dk_import_callback.
+ */
+function os2web_borger_dk_import_callback($data) {
+  // Queue delete and release.
+  global $os2web_borger_dk_article_count_no;
+  global $os2web_borger_dk_article_start_time;
+  if (!isset($os2web_borger_dk_article_count_no)) {
+    $os2web_borger_dk_article_count_no = 1;
+    $os2web_borger_dk_article_start_time = time();
+  }
+  if ((time() - $os2web_borger_dk_article_start_time <= 60) && ($os2web_borger_dk_article_count_no <= 100)) {
+    $node = node_load($data);
+    $node->title = 'updated 13:41';
+    $node->field_os2web_byline['und'][0]['value'] = 'updated 13:41 ';
+
+    $node->field_os2web_byline['und'][0]['safe_value'] = 'updated 13:41 ';
+    $node->external_id = '4';
+    error_log('node id : ' . $node->nid . "\n");
+    node_save($node);
+    $os2web_borger_dk_article_count_no += 1;
+  }
+  else {
+    sleep(60 - (time() - $os2web_borger_dk_article_start_time));
+    $os2web_borger_dk_article_count_no = 1;
+    $os2web_borger_dk_article_start_time = time();
+    error_log('start again : ' . $os2web_borger_dk_article_start_time . "\n");
+  }
+}
