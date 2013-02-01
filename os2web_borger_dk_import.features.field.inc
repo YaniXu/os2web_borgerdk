@@ -1179,7 +1179,7 @@ function os2web_borger_dk_import_field_default_fields() {
   t('Post-text');
   t('Pre-text');
   t('Header');
-  t('Byling');
+  t('Byline');
   t('Recommended');
   t('Shortlist'); 
  
